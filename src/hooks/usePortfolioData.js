@@ -1,0 +1,158 @@
+// usePortfolioData.js — React hook for reactive portfolio data with Firebase Firestore & localStorage sync
+import { useState, useEffect, useCallback } from "react";
+import {
+  getPortfolioData,
+  savePortfolioData,
+  THEME_PRESETS,
+} from "../data/portfolioData";
+import { db, isConfigured } from "../firebase";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
+
+export function usePortfolioData() {
+  const [data, setData] = useState(() => getPortfolioData());
+
+  useEffect(() => {
+    // 1. Firebase Firestore real-time listener if configured
+    if (isConfigured && db) {
+      const docRef = doc(db, "portfolio", "main");
+      const unsubscribe = onSnapshot(
+        docRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const remoteData = snapshot.data();
+            setData(remoteData);
+            savePortfolioData(remoteData, false); // sync locally without re-triggering event
+          } else {
+            // First time setup: push local default data to Firestore
+            setDoc(docRef, getPortfolioData()).catch(console.error);
+          }
+        },
+        (error) => {
+          console.warn("Firestore subscription warning:", error);
+        }
+      );
+
+      return () => unsubscribe();
+    }
+
+    // 2. Local storage listener fallback
+    const handler = () => {
+      setData(getPortfolioData());
+    };
+    window.addEventListener("portfolio-data-updated", handler);
+    return () => window.removeEventListener("portfolio-data-updated", handler);
+  }, []);
+
+  const updateData = useCallback((updater) => {
+    const currentData = getPortfolioData();
+    const next = typeof updater === "function" ? updater(currentData) : updater;
+
+    // Save locally
+    savePortfolioData(next);
+
+    // Sync to Firebase Firestore if configured
+    if (isConfigured && db) {
+      const docRef = doc(db, "portfolio", "main");
+      setDoc(docRef, next, { merge: true }).catch((err) =>
+        console.error("Failed to sync to Firestore:", err)
+      );
+    }
+  }, []);
+
+  return { data, updateData };
+}
+
+export function useTheme() {
+  const { data, updateData } = usePortfolioData();
+  const preset = THEME_PRESETS[data.theme?.preset] || THEME_PRESETS.amber;
+
+  // Global default theme set by Admin in Firestore
+  const defaultMode = data.theme?.mode || "dark";
+
+  // Visitor-specific local theme preference (saved on visitor's device)
+  const [localOverride, setLocalOverride] = useState(() => {
+    return localStorage.getItem("visitor_theme_override") || null;
+  });
+
+  useEffect(() => {
+    const handleLocalTheme = () => {
+      setLocalOverride(localStorage.getItem("visitor_theme_override") || null);
+    };
+    window.addEventListener("visitor-theme-updated", handleLocalTheme);
+    return () => window.removeEventListener("visitor-theme-updated", handleLocalTheme);
+  }, []);
+
+  const activeMode = localOverride || defaultMode;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--primary-hsl", preset.primary);
+    root.style.setProperty("--primary-rgb", preset.primaryRGB);
+    root.style.setProperty("--accent-hsl", preset.accent);
+    root.style.setProperty("--glow-hsl", preset.glow);
+    root.setAttribute("data-theme", activeMode);
+
+    // Dynamic browser tab favicon color update
+    const color = preset.hex || "#ffaa00";
+    const svgFavicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:${color}"/>
+          <stop offset="100%" style="stop-color:${color}"/>
+        </linearGradient>
+      </defs>
+      <rect width="100" height="100" rx="20" fill="#0f0f17"/>
+      <text x="50" y="68" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-weight="900" font-size="52" fill="url(#g)">AQ</text>
+    </svg>`;
+    const encoded = `data:image/svg+xml;base64,${btoa(svgFavicon)}`;
+    let link = document.querySelector("link[rel*='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.href = encoded;
+  }, [preset, activeMode]);
+
+  const setThemePreset = (presetKey) => {
+    updateData((prev) => ({
+      ...prev,
+      theme: { ...prev.theme, preset: presetKey },
+    }));
+  };
+
+  // Visitor local mode toggle — changes theme for current browser session ONLY
+  const toggleLocalMode = () => {
+    const newMode = activeMode === "dark" ? "light" : "dark";
+    localStorage.setItem("visitor_theme_override", newMode);
+    setLocalOverride(newMode);
+    window.dispatchEvent(new CustomEvent("visitor-theme-updated"));
+  };
+
+  // Admin global default mode setting — updates default theme in Firestore for all new visitors
+  const setDefaultMode = (modeName) => {
+    // Clear local override when admin sets a new global default
+    localStorage.removeItem("visitor_theme_override");
+    setLocalOverride(null);
+    window.dispatchEvent(new CustomEvent("visitor-theme-updated"));
+
+    updateData((prev) => ({
+      ...prev,
+      theme: {
+        ...prev.theme,
+        mode: modeName,
+      },
+    }));
+  };
+
+  return {
+    preset,
+    presetKey: data.theme?.preset,
+    setThemePreset,
+    toggleMode: toggleLocalMode, // Toggles theme locally for visitor
+    setDefaultMode,            // Sets default theme in Firestore (Admin)
+    setMode: setDefaultMode,
+    mode: activeMode,
+    defaultMode,
+  };
+}
