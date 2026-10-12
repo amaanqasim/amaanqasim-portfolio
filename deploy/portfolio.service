@@ -1,0 +1,21 @@
+[Unit]
+Description=Amaan Portfolio Express API
+After=network.target
+
+[Service]
+Type=simple
+User=portfolio
+Group=portfolio
+WorkingDirectory=/var/www/amaan-portfolio
+EnvironmentFile=/etc/amaan-portfolio/portfolio.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/amaan-portfolio
+
+[Install]
+WantedBy=multi-user.target

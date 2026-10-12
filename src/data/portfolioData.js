@@ -1,4 +1,4 @@
-// portfolioData.js — Central data store with localStorage & Firebase sync
+// Default public portfolio content and theme presets.
 const DEFAULT_DATA = {
   personal: {
     name: "Amaan Qasim",
@@ -132,54 +132,5 @@ export const THEME_PRESETS = {
     hex: "#e63c6e",
   },
 };
-
-const STORAGE_KEY = "amaan_portfolio_data";
-
-export function getPortfolioData() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return deepMerge(DEFAULT_DATA, parsed);
-    }
-  } catch (e) {
-    console.warn("Failed to load portfolio data from storage", e);
-  }
-  return { ...DEFAULT_DATA };
-}
-
-export function savePortfolioData(data, emitEvent = true) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    if (emitEvent) {
-      window.dispatchEvent(new CustomEvent("portfolio-data-updated"));
-    }
-  } catch (e) {
-    console.error("Failed to save portfolio data", e);
-  }
-}
-
-export function resetPortfolioData() {
-  localStorage.removeItem(STORAGE_KEY);
-  window.dispatchEvent(new CustomEvent("portfolio-data-updated"));
-}
-
-function deepMerge(target, source) {
-  const output = { ...target };
-  if (source && typeof source === "object") {
-    for (const key of Object.keys(source)) {
-      if (
-        source[key] &&
-        typeof source[key] === "object" &&
-        !Array.isArray(source[key])
-      ) {
-        output[key] = deepMerge(target[key] || {}, source[key]);
-      } else {
-        output[key] = source[key];
-      }
-    }
-  }
-  return output;
-}
 
 export default DEFAULT_DATA;

@@ -14,7 +14,7 @@ import {
   FiArrowLeft,
   FiCheck,
 } from "react-icons/fi";
-import { logoutAdmin, changePassword, getCredentials } from "../../auth/adminAuth";
+import { logoutAdmin, changePassword } from "../../auth/adminAuth";
 import { usePortfolioData, useTheme } from "../../hooks/usePortfolioData";
 import { THEME_PRESETS } from "../../data/portfolioData";
 
@@ -30,21 +30,35 @@ const TABS = [
 export default function AdminDashboard({ onLogout }) {
   const [activeTab, setActiveTab] = useState("personal");
   const [toast, setToast] = useState(null);
-  const { data, updateData } = usePortfolioData();
+  const { data, updateData, loading, error } = usePortfolioData();
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleLogout = () => {
-    logoutAdmin();
-    onLogout();
+  useEffect(() => {
+    const saved = () => showToast("Changes saved successfully!");
+    const failed = (event) => showToast(event.detail?.message || "Changes could not be saved.", "error");
+    window.addEventListener("portfolio-save-success", saved);
+    window.addEventListener("portfolio-save-error", failed);
+    return () => {
+      window.removeEventListener("portfolio-save-success", saved);
+      window.removeEventListener("portfolio-save-error", failed);
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    try { await logoutAdmin(); onLogout(); }
+    catch { showToast("Could not end the admin session. Try again.", "error"); }
   };
 
   const handleSave = () => {
-    showToast("Changes saved successfully!");
+    showToast("Saving changes…");
   };
+
+  if (loading) return <div className="admin-login"><p>Loading portfolio data…</p></div>;
+  if (error) return <div className="admin-login"><p role="alert">{error}</p></div>;
 
   return (
     <div className="admin-dashboard">
@@ -421,7 +435,7 @@ function SkillsTab({ data, updateData, onSave }) {
           </p>
         </div>
         <button
-          className={`btn ${Boolean(data.theme?.showPercentage) ? "btn--primary" : "btn--ghost"}`}
+          className={`btn ${data.theme?.showPercentage ? "btn--primary" : "btn--ghost"}`}
           onClick={() => {
             const nextValue = !data.theme?.showPercentage;
             updateData((prev) => ({
@@ -434,7 +448,7 @@ function SkillsTab({ data, updateData, onSave }) {
             onSave();
           }}
         >
-          {Boolean(data.theme?.showPercentage) ? "📊 Progress Bars Enabled" : "🏷️ Pill View (Glowing Dots)"}
+          {data.theme?.showPercentage ? "📊 Progress Bars Enabled" : "🏷️ Pill View (Glowing Dots)"}
         </button>
       </div>
 
@@ -642,8 +656,8 @@ function ThemeTab() {
           <h4 style={{ fontWeight: 600, marginBottom: "0.25rem" }}>Show Skill Percentages</h4>
           <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Display percentage progress bars or clean glowing dots.</p>
         </div>
-        <button className={`btn ${Boolean(data.theme?.showPercentage) ? "btn--primary" : "btn--ghost"}`} onClick={togglePercentageDisplay}>
-          {Boolean(data.theme?.showPercentage) ? "Percentages Enabled ✓" : "Pill View Active (Dots)"}
+        <button className={`btn ${data.theme?.showPercentage ? "btn--primary" : "btn--ghost"}`} onClick={togglePercentageDisplay}>
+          {data.theme?.showPercentage ? "Percentages Enabled ✓" : "Pill View Active (Dots)"}
         </button>
       </div>
 
@@ -689,14 +703,6 @@ function SecurityTab({ showToast }) {
   const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
-  const [recoveryKey, setRecoveryKey] = useState("");
-
-  useEffect(() => {
-    const creds = getCredentials();
-    if (creds.recoveryKey) {
-      setRecoveryKey(creds.recoveryKey);
-    }
-  }, []);
 
   const handleChangePassword = async () => {
     if (!currentPwd) {
@@ -707,16 +713,12 @@ function SecurityTab({ showToast }) {
       showToast("New passwords don't match", "error");
       return;
     }
-    if (newPwd.length < 8) {
-      showToast("New password must be at least 8 characters", "error");
-      return;
-    }
-    if (recoveryKey && recoveryKey.trim().length < 6) {
-      showToast("Recovery key must be at least 6 characters", "error");
+    if (newPwd.length < 12) {
+      showToast("New password must be at least 12 characters", "error");
       return;
     }
 
-    const result = await changePassword(currentPwd, newPwd, recoveryKey);
+    const result = await changePassword(currentPwd, newPwd);
     if (result.success) {
       showToast("Security settings updated successfully!");
       setCurrentPwd("");
@@ -735,7 +737,7 @@ function SecurityTab({ showToast }) {
 
       <div className="admin-form" style={{ maxWidth: "500px" }}>
         <p style={{ color: "var(--text-secondary)", marginBottom: "0.5rem", fontSize: "0.9rem" }}>
-          Update your admin password and custom Master Recovery Key.
+          Change the admin password. If you lose access, reset it from the server command line.
         </p>
 
         <div className="admin-form__group">
@@ -749,7 +751,7 @@ function SecurityTab({ showToast }) {
           <label className="admin-form__label">New Password</label>
           <input className="admin-form__input" type="password" value={newPwd}
             onChange={(e) => setNewPwd(e.target.value)}
-            placeholder="Min 8 characters"
+            placeholder="At least 12 characters"
           />
         </div>
         <div className="admin-form__group">
@@ -758,17 +760,6 @@ function SecurityTab({ showToast }) {
             onChange={(e) => setConfirmPwd(e.target.value)}
             placeholder="Re-enter new password"
           />
-        </div>
-
-        <div className="admin-form__group" style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border-subtle)" }}>
-          <label className="admin-form__label">Master Recovery Key</label>
-          <input className="admin-form__input" type="text" value={recoveryKey}
-            onChange={(e) => setRecoveryKey(e.target.value)}
-            placeholder="e.g. AQ-2026-RECOVER"
-          />
-          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-            Used to reset your password if you ever forget it. Save this key in a safe place.
-          </span>
         </div>
 
         <div className="admin-form__actions" style={{ marginTop: "1rem" }}>
